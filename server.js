@@ -1,0 +1,164 @@
+const express = require('express');
+const session = require('express-session');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const cors = require('cors');
+const path = require('path');
+const config = require('./config');
+require('dotenv').config();
+
+const app = express();
+const PORT = config.app.port;
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static('public'));
+
+// Configuração de sessão
+app.use(session({
+  secret: config.app.sessionSecret,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: config.app.nodeEnv === 'production',
+    maxAge: 24 * 60 * 60 * 1000 // 24 horas
+  }
+}));
+
+// Middleware de autenticação
+const requireAuth = (req, res, next) => {
+  if (req.session.authenticated) {
+    next();
+  } else {
+    res.redirect('/login');
+  }
+};
+
+// Função para gerar token JWT do Metabase
+function generateMetabaseToken() {
+  const payload = {
+    resource: { dashboard: config.metabase.dashboardId },
+    params: {},
+    exp: Math.round(Date.now() / 1000) + (config.metabase.tokenExpiration * 60) // 10 minute expiration
+  };
+  
+  console.log('Gerando token com payload:', payload);
+  console.log('Secret key:', config.metabase.secret.substring(0, 10) + '...');
+  
+  const token = jwt.sign(payload, config.metabase.secret, { algorithm: 'HS256' });
+  console.log('Token gerado:', token);
+  
+  return token;
+}
+
+// Rotas
+app.get('/', (req, res) => {
+  if (req.session.authenticated) {
+    res.redirect('/dashboard');
+  } else {
+    res.redirect('/login');
+  }
+});
+
+app.get('/login', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+app.post('/login', async (req, res) => {
+  const { password } = req.body;
+  
+  console.log('Tentativa de login com senha');
+  
+  // Verifica credenciais
+  if (password === config.admin.password) {
+    req.session.authenticated = true;
+    req.session.user = { loginTime: new Date() };
+    
+    console.log('✅ Login bem-sucedido');
+    res.json({ success: true, redirect: '/dashboard' });
+  } else {
+    console.log('❌ Login falhou - senha incorreta');
+    res.status(401).json({ 
+      success: false, 
+      message: 'Senha incorreta' 
+    });
+  }
+});
+
+app.get('/dashboard', requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+});
+
+app.get('/api/metabase-token', requireAuth, (req, res) => {
+  try {
+    console.log('Solicitação de token recebida');
+    console.log('Configurações:', {
+      metabaseUrl: config.metabase.url,
+      dashboardId: config.metabase.dashboardId,
+      secretKey: config.metabase.secret.substring(0, 10) + '...'
+    });
+    
+    const token = generateMetabaseToken();
+    const iframeUrl = `${config.metabase.url}/embed/dashboard/${token}#bordered=true&titled=true`;
+    
+    console.log('URL do iframe gerada:', iframeUrl);
+    
+    res.json({ 
+      success: true, 
+      token, 
+      iframeUrl 
+    });
+  } catch (error) {
+    console.error('Erro ao gerar token:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Erro ao gerar token do Metabase',
+      error: error.message 
+    });
+  }
+});
+
+app.post('/logout', (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      console.error('Erro ao fazer logout:', err);
+      return res.status(500).json({ success: false });
+    }
+    res.json({ success: true, redirect: '/login' });
+  });
+});
+
+// Rota de teste
+app.get('/api/test', (req, res) => {
+  res.json({ 
+    message: 'API funcionando!', 
+    timestamp: new Date().toISOString(),
+    config: {
+      metabaseUrl: config.metabase.url,
+      dashboardId: config.metabase.dashboardId
+    }
+  });
+});
+
+// Middleware de erro
+app.use((err, req, res, next) => {
+  console.error('Erro:', err);
+  res.status(500).json({ 
+    success: false, 
+    message: 'Erro interno do servidor' 
+  });
+});
+
+// Iniciar servidor
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+  console.log(`📊 Dashboard: http://localhost:${PORT}`);
+  console.log(`🔐 Login: http://localhost:${PORT}/login`);
+  console.log(`⚙️  Configurações:`);
+  console.log(`   - Dashboard ID: ${config.metabase.dashboardId}`);
+  console.log(`   - Metabase URL: ${config.metabase.url}`);
+});
+
+module.exports = app;
