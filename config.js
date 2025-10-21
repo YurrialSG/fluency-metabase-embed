@@ -7,7 +7,7 @@ module.exports = {
   
   // Configurações do Metabase
   metabase: {
-    url: "http://base-prod.fluencyacademy.io",
+    url: "https://base-prod.fluencyacademy.io",
     secret: "67f7e6a92f6622653521d95070259fb9b14a512d667c2b24be5caa3b19f26476",
     dashboardId: 16,
     tokenExpiration: 10

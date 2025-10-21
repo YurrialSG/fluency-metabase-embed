@@ -11,10 +11,20 @@ const app = express();
 const PORT = config.app.port;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static('public'));
+app.use(express.static('public', {
+  setHeaders: (res, path) => {
+    // Adiciona headers de segurança
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+  }
+}));
 
 // Configuração de sessão
 app.use(session({
@@ -125,7 +135,8 @@ app.get('/api/metabase-token', requireAuth, (req, res) => {
     res.json({ 
       success: true, 
       token, 
-      iframeUrl 
+      iframeUrl,
+      metabaseUrl: config.metabase.url
     });
   } catch (error) {
     console.error('Erro ao gerar token:', error);
@@ -157,6 +168,71 @@ app.get('/api/test', (req, res) => {
       dashboardId: config.metabase.dashboardId
     }
   });
+});
+
+// Rota para testar conectividade com Metabase
+app.get('/api/test-metabase', async (req, res) => {
+  try {
+    const https = require('https');
+    const url = require('url');
+    
+    const metabaseUrl = config.metabase.url;
+    const parsedUrl = url.parse(metabaseUrl);
+    
+    const options = {
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port || 443,
+      path: '/api/health',
+      method: 'GET',
+      timeout: 5000
+    };
+    
+    const request = https.request(options, (response) => {
+      let data = '';
+      response.on('data', (chunk) => {
+        data += chunk;
+      });
+      
+      response.on('end', () => {
+        res.json({
+          success: true,
+          metabaseUrl: metabaseUrl,
+          status: response.statusCode,
+          accessible: response.statusCode === 200,
+          response: data
+        });
+      });
+    });
+    
+    request.on('error', (error) => {
+      res.json({
+        success: false,
+        metabaseUrl: metabaseUrl,
+        error: error.message,
+        accessible: false
+      });
+    });
+    
+    request.on('timeout', () => {
+      request.destroy();
+      res.json({
+        success: false,
+        metabaseUrl: metabaseUrl,
+        error: 'Timeout',
+        accessible: false
+      });
+    });
+    
+    request.setTimeout(5000);
+    request.end();
+    
+  } catch (error) {
+    res.json({
+      success: false,
+      error: error.message,
+      accessible: false
+    });
+  }
 });
 
 // Rota de debug da sessão
