@@ -22,16 +22,24 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: config.app.nodeEnv === 'production',
+    secure: false, // Desabilitado para funcionar com HTTP na Vercel
+    httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000 // 24 horas
   }
 }));
 
 // Middleware de autenticação
 const requireAuth = (req, res, next) => {
+  console.log('🔐 Verificando autenticação:', {
+    authenticated: req.session.authenticated,
+    sessionId: req.sessionID,
+    user: req.session.user
+  });
+  
   if (req.session.authenticated) {
     next();
   } else {
+    console.log('❌ Usuário não autenticado, redirecionando para login');
     res.redirect('/login');
   }
 };
@@ -69,14 +77,23 @@ app.get('/login', (req, res) => {
 app.post('/login', async (req, res) => {
   const { password } = req.body;
   
-  console.log('Tentativa de login com senha');
+  console.log('🔑 Tentativa de login:', {
+    sessionId: req.sessionID,
+    hasPassword: !!password,
+    expectedPassword: config.admin.password
+  });
   
   // Verifica credenciais
   if (password === config.admin.password) {
     req.session.authenticated = true;
     req.session.user = { loginTime: new Date() };
     
-    console.log('✅ Login bem-sucedido');
+    console.log('✅ Login bem-sucedido:', {
+      sessionId: req.sessionID,
+      authenticated: req.session.authenticated,
+      user: req.session.user
+    });
+    
     res.json({ success: true, redirect: '/dashboard' });
   } else {
     console.log('❌ Login falhou - senha incorreta');
@@ -138,6 +155,20 @@ app.get('/api/test', (req, res) => {
     config: {
       metabaseUrl: config.metabase.url,
       dashboardId: config.metabase.dashboardId
+    }
+  });
+});
+
+// Rota de debug da sessão
+app.get('/api/session-debug', (req, res) => {
+  res.json({
+    sessionId: req.sessionID,
+    authenticated: req.session.authenticated,
+    user: req.session.user,
+    sessionData: req.session,
+    headers: {
+      cookie: req.headers.cookie,
+      userAgent: req.headers['user-agent']
     }
   });
 });
